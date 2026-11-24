@@ -15,9 +15,12 @@
 <title>Fuel Log</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..800&family=Geist+Mono:wght@400..600&display=swap">
+<link rel="preconnect" href="https://script.google.com" crossorigin>
+<link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..800&family=Geist+Mono:wght@400..600&display=swap" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..800&family=Geist+Mono:wght@400..600&display=swap"></noscript>
 <style>
-/* Fuel Log v2. One phone-width column: protein today > log > strength > trends > 12 months. */
+/* Fuel Log v2.2 (fast open). One phone-width column: protein today > log > strength > trends > 12 months. */
 :root {
   --bg: #f3f4f1; --surface: #ffffff; --surface-2: #eceee9; --surface-3: #e2e5df;
   --ink: #0e1210; --ink-2: #48514c; --muted: #7c857f; --line: rgb(14 18 16 / .08);
@@ -338,17 +341,34 @@ details.settings summary { cursor: pointer; font-weight: 600; }
   const STAR = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.5L12 17.3l-5.9 3.2 1.3-6.5L2.5 9.4l6.6-.8z"/></svg>';
 
   // ---------- data ----------
+  // The last good feed is kept on the phone. On open it paints straight away, then the fresh feed replaces it.
+  let haveLive = false, lastLoad = 0, loadSeq = 0;
+  function saveFeed(j) { try { store.set('feed', JSON.stringify(j)); } catch (e) {} }
+  function savedFeed() {
+    try {
+      const j = JSON.parse(store.get('feed') || 'null');
+      return j && j.ok && j.today === iso(new Date()) ? j : null;   // only trust a copy from today
+    } catch (e) { return null; }
+  }
   async function load() {
     const api = store.get('api'), key = store.get('key');
-    if (!api || !key || store.get('demo') === '1') { DEMO = true; DATA = demoData(); render(); return; }
+    if (!api || !key || store.get('demo') === '1') { DEMO = true; haveLive = false; DATA = demoData(); render(); return; }
     DEMO = false;
-    $('#foot').textContent = 'Loading...';
+    const seq = ++loadSeq; lastLoad = Date.now();
+    if (!haveLive) {
+      const saved = savedFeed();
+      if (saved) { DATA = saved; haveLive = true; render(); }
+    }
+    $('#foot').textContent = 'Updating...';
     try {
       const r = await fetch(api + '?key=' + encodeURIComponent(key) + '&t=' + Date.now());
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || 'Feed error');
-      DATA = j; render();
+      if (seq !== loadSeq) return;
+      DATA = j; haveLive = true; saveFeed(j); render();
     } catch (e) {
+      if (seq !== loadSeq) return;
+      if (haveLive) { $('#foot').textContent = 'Showing saved data'; showBanner('<b>Could not refresh.</b> ' + esc(e.message) + '. Showing the last saved data.'); return; }
       DEMO = true; DATA = demoData(); render();
       showBanner('<b>Could not reach your Sheet.</b> ' + esc(e.message) + '. Showing example data. Check the connection settings at the bottom.');
     }
@@ -821,7 +841,7 @@ details.settings summary { cursor: pointer; font-weight: 600; }
   $('#apiUrl').value = store.get('api'); $('#apiKey').value = store.get('key');
   $('#saveConn').addEventListener('click', () => { store.set('api', $('#apiUrl').value.trim()); store.set('key', $('#apiKey').value.trim()); store.set('demo', '0'); $('#banner').hidden = true; load(); });
   $('#useDemo').addEventListener('click', () => { store.set('demo', '1'); load(); });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && !DEMO) load(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && !DEMO && Date.now() - lastLoad > 30000) load(); });
 
   // ---------- example data ----------
   function rnd(seed) { let s = seed; return () => (s = (s * 16807) % 2147483647) / 2147483647; }
